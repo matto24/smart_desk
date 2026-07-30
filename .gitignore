@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+
+# KiCad local history & auto-backups (personal snapshots, not project data)
+**/.history/
+*-backups/
+fp-info-cache
+*.bak
+
+# KiCad per-user local settings (window layout etc., not the design)
+*.kicad_prl
+
+# KiCad lock file (present only while the project is open)
+*.lck
+
+# Fusion 360 / CAD scratch
+*.f3d~
