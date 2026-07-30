@@ -65,4 +65,6 @@ small WiFi web server.
 
 ## License
 
-_No license chosen yet — see notes below on adding one._
+Released under the [MIT License](LICENSE) — free to use, modify, and
+distribute, keep the copyright notice. The bundled Seeed XIAO KiCad libraries
+under `kicad_files/libraries/` remain the property of Seeed Studio.
