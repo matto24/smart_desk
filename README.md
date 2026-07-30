@@ -8,6 +8,12 @@ small WiFi web server.
 
 > `skrivebord` is Danish for *desk*.
 
+<p align="center">
+  <img src="casing/casing.png" alt="3D-printed enclosure holding the controller PCB" width="640">
+  <br>
+  <em>The press-fit 3D-printed enclosure — sensor opening on top, ventilation slots on the front.</em>
+</p>
+
 ## How it works
 
 - The ESP32-C6 hosts an HTTP endpoint: `GET /target?cm=<height>`.
