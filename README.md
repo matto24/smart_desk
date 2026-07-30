@@ -1,4 +1,4 @@
-# skrivebord_controller
+# Desk Controller
 
 Open-hardware controller for a motorized (sit/stand) desk. A
 [Seeed XIAO ESP32-C6](https://wiki.seeedstudio.com/xiao_esp32c6_getting_started/)
