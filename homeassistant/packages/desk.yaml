@@ -1,0 +1,161 @@
+# Home Assistant package for the desk controller (esp_program/main/main.ino).
+#
+# Install: copy this file to /config/packages/desk.yaml on Home Assistant,
+# replace DESK_IP below with the controller's IP address, and make sure
+# configuration.yaml has:
+#
+#   homeassistant:
+#     packages: !include_dir_named packages
+#
+# Then restart Home Assistant. See README.md -> "Home Assistant".
+
+rest_command:
+  desk:
+    # DESK_IP is the only thing to change: the ESP's (reserved) IP address.
+    url: >-
+      http://DESK_IP/{{ endpoint }}{% if cm is defined and cm | string | length > 0 %}?cm={{ cm }}{% endif %}
+    method: get
+    timeout: 30 # longer than the firmware's 20 s move cutoff
+
+# "Desk height" only changes when the desk replies, so the lidar is never polled.
+template:
+  - triggers:
+      - trigger: event
+        event_type: desk_height_reported
+    sensor:
+      - name: Desk height
+        unique_id: desk_height
+        unit_of_measurement: cm
+        device_class: distance
+        state_class: measurement
+        state: "{{ trigger.event.data.height }}"
+
+input_number:
+  desk_target:
+    name: Desk target
+    icon: mdi:desk
+    min: 64
+    max: 114
+    step: 1
+    unit_of_measurement: cm
+    mode: slider
+
+script:
+  # Every desk action goes through here. mode: single means a press that
+  # arrives while the desk is moving is dropped, not queued behind it.
+  desk_call:
+    alias: Desk - send command
+    mode: single
+    max_exceeded: silent
+    fields:
+      endpoint:
+        description: "target, nudge or height"
+        required: true
+        example: target
+        selector:
+          select:
+            options: [target, nudge, height]
+      cm:
+        description: "Height in cm (target) or change in cm (nudge); unused for height"
+        example: 90
+        selector:
+          number:
+            min: -50
+            max: 114
+            step: 0.5
+            unit_of_measurement: cm
+    sequence:
+      - action: rest_command.desk
+        data:
+          endpoint: "{{ endpoint }}"
+          cm: "{{ cm | default('') }}"
+        response_variable: r
+        continue_on_error: true
+      - if:
+          - condition: template
+            value_template: "{{ r is defined and r.status == 200 }}"
+        then:
+          - event: desk_height_reported
+            event_data:
+              height: "{{ r.content.height }}"
+        else:
+          - action: persistent_notification.create
+            data:
+              notification_id: desk_error
+              title: Desk
+              message: >-
+                {% if r is defined and r.content is mapping and 'error' in r.content %}
+                Desk error: {{ r.content.error }}
+                {% else %}
+                Desk controller unreachable
+                {% endif %}
+
+  desk_sit:
+    alias: Desk - sit
+    icon: mdi:chair-rolling
+    mode: single
+    sequence:
+      - action: script.desk_call
+        data:
+          endpoint: target
+          cm: 72
+
+  desk_stand:
+    alias: Desk - stand
+    icon: mdi:human-handsup
+    mode: single
+    sequence:
+      - action: script.desk_call
+        data:
+          endpoint: target
+          cm: 111
+
+  desk_up_1:
+    alias: Desk - up 1 cm
+    icon: mdi:arrow-up
+    mode: single
+    sequence:
+      - action: script.desk_call
+        data:
+          endpoint: nudge
+          cm: 1
+
+  desk_down_1:
+    alias: Desk - down 1 cm
+    icon: mdi:arrow-down
+    mode: single
+    sequence:
+      - action: script.desk_call
+        data:
+          endpoint: nudge
+          cm: -1
+
+  desk_measure:
+    alias: Desk - measure height
+    icon: mdi:ruler
+    mode: single
+    sequence:
+      - action: script.desk_call
+        data:
+          endpoint: height
+
+automation:
+  - id: desk_move_to_slider_target
+    alias: Desk - move to slider target
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: input_number.desk_target
+    conditions:
+      # Skip the state restore at Home Assistant startup, so a restart never
+      # moves the desk.
+      - condition: template
+        value_template: >-
+          {{ trigger.from_state is not none
+             and trigger.from_state.state not in ['unknown', 'unavailable']
+             and trigger.to_state.state not in ['unknown', 'unavailable'] }}
+    actions:
+      - action: script.desk_call
+        data:
+          endpoint: target
+          cm: "{{ trigger.to_state.state | float | round(0) | int }}"

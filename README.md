@@ -78,6 +78,59 @@ small WiFi web server that [Home Assistant](#home-assistant) can control.
 
 To check the logic without the board, run `esp_program/tests/run_tests.sh`.
 
+## Home Assistant
+
+`homeassistant/packages/desk.yaml` adds the desk to Home Assistant over the
+HTTP API above. You don't need MQTT or any add-ons. It gives you:
+
+- **Desk height** (`sensor.desk_height`), updated after every action. The
+  lidar is never polled, so the value is the last known height.
+- **Desk target** slider (`input_number.desk_target`, 64–114 cm). Moving it
+  moves the desk. Restarting Home Assistant does not.
+- Scripts **Sit** (72 cm), **Stand** (111 cm), **+1 cm**, **−1 cm** and
+  **Measure**. While the desk is moving, further presses are ignored.
+- A notification (`Desk`) if the controller replies with an error or can't be
+  reached.
+
+Setup:
+
+1. Reserve a fixed IP for the ESP in your router (DHCP reservation).
+2. Copy `homeassistant/packages/desk.yaml` to `/config/packages/desk.yaml` on
+   Home Assistant (e.g. with the File editor or Samba add-on), and replace
+   `DESK_IP` in it with that IP.
+3. Make sure `/config/configuration.yaml` loads packages:
+
+   ```yaml
+   homeassistant:
+     packages: !include_dir_named packages
+   ```
+
+4. Check the configuration (Developer tools → YAML → Check configuration) and
+   restart Home Assistant.
+5. Add a dashboard card (Edit dashboard → Add card → Manual):
+
+   ```yaml
+   type: entities
+   title: Desk
+   entities:
+     - sensor.desk_height
+     - input_number.desk_target
+     - type: buttons
+       entities:
+         - entity: script.desk_down_1
+           name: "-1 cm"
+         - entity: script.desk_up_1
+           name: "+1 cm"
+         - entity: script.desk_sit
+           name: Sit
+         - entity: script.desk_stand
+           name: Stand
+         - entity: script.desk_measure
+           name: Measure
+   ```
+
+To change the presets, edit the `cm:` values in `desk_sit` / `desk_stand`.
+
 ## Hardware
 
 - Board / schematic / gerbers: open `kicad_files/skrivebord.kicad_pro` in
