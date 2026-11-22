@@ -76,6 +76,13 @@ int main() {
   CHECK(wifiAction(false, 20000, 0xFFFFFFFFUL - 1000, 0xFFFFFFFFUL - 1000) ==
         WifiAction::Retry);                                       // millis() wraparound
 
+  // readingGapTooLong: never drive more than 1 s without a good reading
+  CHECK(!readingGapTooLong(1900, 1000));
+  CHECK(!readingGapTooLong(2000, 1000));
+  CHECK(readingGapTooLong(2001, 1000));
+  CHECK(readingGapTooLong(3000, 1000));           // e.g. a blocked Serial.print
+  CHECK(!readingGapTooLong(500, 0xFFFFFFFFUL - 100));  // millis() wraparound
+
   // JSON
   char b[64];
   formatHeightJson(b, sizeof b, 90.14f);

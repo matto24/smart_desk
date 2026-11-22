@@ -72,6 +72,15 @@ inline WifiAction wifiAction(bool connected, uint32_t nowMs, uint32_t lastConnec
   return WifiAction::None;
 }
 
+// Safety net for the move loop: if this long passes without a good lidar
+// reading (sensor trouble, or anything blocking the loop such as a stalled
+// USB serial write), stop rather than keep driving blind.
+constexpr uint32_t kMaxReadingGapMs = 1000;
+
+inline bool readingGapTooLong(uint32_t nowMs, uint32_t lastGoodReadingMs) {
+  return (uint32_t)(nowMs - lastGoodReadingMs) > kMaxReadingGapMs;
+}
+
 inline Direction chooseDirection(float currentCm, float targetCm) {
   float diff = targetCm - currentCm;
   if (std::fabs(diff) <= kDeadBandCm) return Direction::None;

@@ -136,6 +136,8 @@ MoveResult moveTo(float targetCm) {
   }
 
   Direction dir = chooseDirection(cur_dist, targetCm);
+  Serial.printf("[DBG] move start: current %.1f cm, target %.1f cm, dir %s\n", cur_dist, targetCm,
+                dir == Direction::Up ? "UP" : dir == Direction::Down ? "DOWN" : "none");
   if (dir == Direction::None) {
     return {true, cur_dist, nullptr};  // already there (dead band)
   }
@@ -151,6 +153,7 @@ MoveResult moveTo(float targetCm) {
 
   const char* error = nullptr;
   unsigned long startTime = millis();
+  uint32_t lastGoodReadingMs = startTime;
   int failCount = 0;
   while (true) {
     if (millis() - startTime > MAX_MOVE_MS) {
@@ -160,6 +163,11 @@ MoveResult moveTo(float targetCm) {
     }
 
     float d = readDistanceCm();
+    if (readingGapTooLong(millis(), lastGoodReadingMs)) {
+      Serial.println("No good reading for over 1 s - stopping");
+      error = "readings too slow";
+      break;
+    }
     if (d <= 0) {
       if (++failCount > 10) {
         Serial.println("Sensor lost - aborting");
@@ -171,6 +179,7 @@ MoveResult moveTo(float targetCm) {
       continue;
     }
     failCount = 0;
+    lastGoodReadingMs = millis();
 
     cur_dist = d;
     Serial.print("Afstand: ");
@@ -183,6 +192,8 @@ MoveResult moveTo(float targetCm) {
   }
 
   digitalWrite(activePin, LOW); // always stop, regardless of why the loop ended
+  Serial.printf("[DBG] move stop: %s at %.1f cm after %lu ms\n",
+                error ? error : "reached target", cur_dist, millis() - startTime);
 
   // The desk coasts a little after the motor stops; report where it settled.
   delay(300);
@@ -214,6 +225,7 @@ void sendBadRequest() {
 // second client can't start a move the moment the first one ends.
 bool rejectIfStale() {
   if (!isStaleRequest(millis(), lastMoveEndMs, hasMoved)) return false;
+  Serial.println("[DBG] rejected as stale (409 busy)");
   char body[64];
   formatErrorJson(body, sizeof body, "busy");
   server.send(409, "application/json", body);
@@ -227,6 +239,8 @@ void markMoveEnded() {
 
 // GET /target?cm=90 -> moves to 90 cm (clamped), replies {"height":90.1}
 void handleTarget() {
+  Serial.printf("[DBG] HTTP %s cm=%s from %s at %lu ms\n", server.uri().c_str(),
+                server.arg("cm").c_str(), server.client().remoteIP().toString().c_str(), millis());
   float cm;
   if (!parseCm(server.arg("cm").c_str(), &cm)) {
     sendBadRequest();
@@ -246,6 +260,8 @@ void handleTarget() {
 // GET /nudge?cm=-1 -> moves 1 cm down from the current height (clamped,
 // never against the requested direction)
 void handleNudge() {
+  Serial.printf("[DBG] HTTP %s cm=%s from %s at %lu ms\n", server.uri().c_str(),
+                server.arg("cm").c_str(), server.client().remoteIP().toString().c_str(), millis());
   float delta;
   if (!parseCm(server.arg("cm").c_str(), &delta)) {
     sendBadRequest();
@@ -266,6 +282,8 @@ void handleNudge() {
 
 // GET /height -> one reading, lidar off again, replies {"height":92.4}
 void handleHeight() {
+  Serial.printf("[DBG] HTTP %s cm=%s from %s at %lu ms\n", server.uri().c_str(),
+                server.arg("cm").c_str(), server.client().remoteIP().toString().c_str(), millis());
   if (!lidarOn()) {
     sendResult({false, 0, "sensor unavailable"});
     return;
@@ -293,6 +311,12 @@ void setup() {
   digitalWrite(XSHUT, LOW);
 
   Serial.begin(115200);
+#if ARDUINO_USB_CDC_ON_BOOT
+  // Serial goes over USB. With the cable plugged in but no serial monitor
+  // open, each print would otherwise block for up to ~2 s and stall the move
+  // loop, so the desk overshoots. Never wait: drop log output instead.
+  Serial.setTxTimeoutMs(0);
+#endif
   initWiFi();
   Wire.begin();
 
