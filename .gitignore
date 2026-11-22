@@ -15,3 +15,7 @@ fp-info-cache
 
 # Fusion 360 / CAD scratch
 *.f3d~
+
+# Claude/superpowers planning docs (local only)
+docs/superpowers/
+.superpowers/
