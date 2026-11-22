@@ -146,6 +146,7 @@ automation:
     triggers:
       - trigger: state
         entity_id: input_number.desk_target
+        to: ~ # state changes only; editing the helper's settings must not move the desk
     conditions:
       # Skip the state restore at Home Assistant startup, so a restart never
       # moves the desk.

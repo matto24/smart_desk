@@ -33,6 +33,10 @@ small WiFi web server that [Home Assistant](#home-assistant) can control.
   hard safety timeout, so the motor is never left running.
 - A missing or non-numeric `cm` returns `400`; a lidar failure, lost sensor or
   safety timeout returns `503` with `{"error":"..."}`.
+- A `/target` or `/nudge` sent while the desk is already moving is answered
+  `409` (`{"error":"busy"}`) once the move ends, instead of starting a second
+  move. `/nudge` never moves against the requested direction, even if the desk
+  is outside 64–114 cm.
 
 ## Repository layout
 

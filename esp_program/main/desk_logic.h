@@ -4,12 +4,16 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 
 constexpr float kMinHeightCm = 64.0f;
 constexpr float kMaxHeightCm = 114.0f;
 constexpr float kDeadBandCm = 0.5f;  // closer than this: don't drive the motor
+// A request handled this soon after a move ended arrived while the desk was
+// moving (the WebServer queues it); it is stale and must not start a move.
+constexpr uint32_t kStaleRequestWindowMs = 250;
 
 enum class Direction { None, Up, Down };
 
@@ -34,6 +38,22 @@ inline bool parseCm(const char* text, float* out) {
   if (end == text || *end != '\0' || !std::isfinite(value)) return false;
   *out = value;
   return true;
+}
+
+// Target for a relative move. Never drives against the requested direction:
+// if the desk is already outside 64-114 cm, clamping could turn "+1" into a
+// move down, so stay put instead.
+inline float nudgeTarget(float currentCm, float deltaCm) {
+  float target = clampHeight(currentCm + deltaCm);
+  if ((deltaCm > 0 && target < currentCm) || (deltaCm < 0 && target > currentCm)) {
+    return currentCm;
+  }
+  return target;
+}
+
+// nowMs/lastMoveEndMs are millis() values; unsigned subtraction handles wrap.
+inline bool isStaleRequest(uint32_t nowMs, uint32_t lastMoveEndMs, bool hasMoved) {
+  return hasMoved && (uint32_t)(nowMs - lastMoveEndMs) < kStaleRequestWindowMs;
 }
 
 inline Direction chooseDirection(float currentCm, float targetCm) {

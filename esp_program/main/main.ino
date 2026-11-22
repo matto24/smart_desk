@@ -20,6 +20,10 @@ const int XSHUT = D0;
 
 const unsigned long MAX_MOVE_MS = 20000; // hard safety cutoff
 
+// When the last /target or /nudge finished; see isStaleRequest().
+uint32_t lastMoveEndMs = 0;
+bool hasMoved = false;
+
 
 void initWiFi() {
   pinMode(WIFI_ENABLE, OUTPUT); // pinMode(3, OUTPUT);
@@ -158,6 +162,21 @@ void sendBadRequest() {
   server.send(400, "application/json", body);
 }
 
+// A move request that queued up while the desk was moving: refuse it, so a
+// second client can't start a move the moment the first one ends.
+bool rejectIfStale() {
+  if (!isStaleRequest(millis(), lastMoveEndMs, hasMoved)) return false;
+  char body[64];
+  formatErrorJson(body, sizeof body, "busy");
+  server.send(409, "application/json", body);
+  return true;
+}
+
+void markMoveEnded() {
+  lastMoveEndMs = millis();
+  hasMoved = true;
+}
+
 // GET /target?cm=90 -> moves to 90 cm (clamped), replies {"height":90.1}
 void handleTarget() {
   float cm;
@@ -165,6 +184,7 @@ void handleTarget() {
     sendBadRequest();
     return;
   }
+  if (rejectIfStale()) return;
   if (!lidarOn()) {
     sendResult({false, 0, "sensor unavailable"});
     return;
@@ -172,24 +192,28 @@ void handleTarget() {
   MoveResult r = moveTo(clampHeight(cm));
   lidarOff();
   sendResult(r);
+  markMoveEnded();
 }
 
-// GET /nudge?cm=-1 -> moves 1 cm down from the current height (clamped)
+// GET /nudge?cm=-1 -> moves 1 cm down from the current height (clamped,
+// never against the requested direction)
 void handleNudge() {
   float delta;
   if (!parseCm(server.arg("cm").c_str(), &delta)) {
     sendBadRequest();
     return;
   }
+  if (rejectIfStale()) return;
   if (!lidarOn()) {
     sendResult({false, 0, "sensor unavailable"});
     return;
   }
   float cur = readDistanceCm();
   MoveResult r = cur < 0 ? MoveResult{false, 0, "sensor unavailable"}
-                         : moveTo(clampHeight(cur + delta));
+                         : moveTo(nudgeTarget(cur, delta));
   lidarOff();
   sendResult(r);
+  markMoveEnded();
 }
 
 // GET /height -> one reading, lidar off again, replies {"height":92.4}

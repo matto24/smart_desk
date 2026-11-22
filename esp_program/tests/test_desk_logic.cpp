@@ -53,6 +53,20 @@ int main() {
   CHECK(clampHeight(113.5f + 1) == 114);
   CHECK(clampHeight(64.2f - 1) == 64);
 
+  // nudgeTarget: never moves against the requested direction
+  CHECK(nudgeTarget(90, 1) == 91);
+  CHECK(nudgeTarget(113.5f, 1) == 114);
+  CHECK(nudgeTarget(116, 1) == 116);   // above range: +1 must not drive down
+  CHECK(nudgeTarget(62, -1) == 62);    // below range: -1 must not drive up
+  CHECK(nudgeTarget(116, -1) == 114);  // down, back into range: fine
+  CHECK(nudgeTarget(62, 1) == 64);     // up, back into range: fine
+
+  // isStaleRequest: requests queued during a move are rejected
+  CHECK(isStaleRequest(1100, 1000, true));
+  CHECK(!isStaleRequest(1300, 1000, true));
+  CHECK(!isStaleRequest(100, 0, false));          // nothing moved yet
+  CHECK(isStaleRequest(5, 0xFFFFFFFFUL - 10, true));  // millis() wraparound
+
   // JSON
   char b[64];
   formatHeightJson(b, sizeof b, 90.14f);
