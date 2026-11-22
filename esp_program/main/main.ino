@@ -3,6 +3,8 @@
 #include <Wire.h>
 #include <VL53L1X.h>
 
+#include "desk_logic.h"
+
 VL53L1X sensor;
 
 // WiFi Credentials
@@ -72,16 +74,21 @@ float readDistanceCm() {
   return d / 10.0;
 }
 
-void move_to_target(int target) {
-  if (!lidarOn()) return;
+// Drives the desk to targetCm. The lidar must already be on; the caller
+// turns it off. The motor pin is LOW again on every return path.
+MoveResult moveTo(float targetCm) {
   float cur_dist = readDistanceCm();
   if (cur_dist < 0) {
     Serial.println("Fail with initial measurement - abort");
-    lidarOff();
-    return;
+    return {false, 0, "sensor unavailable"};
   }
 
-  bool goingDown = cur_dist > target;
+  Direction dir = chooseDirection(cur_dist, targetCm);
+  if (dir == Direction::None) {
+    return {true, cur_dist, nullptr};  // already there (dead band)
+  }
+
+  bool goingDown = dir == Direction::Down;
   int activePin = goingDown ? PIN_DOWN : PIN_UP;
   int inactivePin = goingDown ? PIN_UP : PIN_DOWN;
 
@@ -90,11 +97,13 @@ void move_to_target(int target) {
   delay(10);
   digitalWrite(activePin, HIGH);
 
+  const char* error = nullptr;
   unsigned long startTime = millis();
   int failCount = 0;
   while (true) {
     if (millis() - startTime > MAX_MOVE_MS) {
       Serial.println("Safety timeout - Stopping");
+      error = "safety timeout";
       break;
     }
 
@@ -102,6 +111,7 @@ void move_to_target(int target) {
     if (d <= 0) {
       if (++failCount > 10) {
         Serial.println("Sensor lost - aborting");
+        error = "sensor lost";
         break;
       }
       Serial.println("Measurement Failure");
@@ -109,36 +119,92 @@ void move_to_target(int target) {
       continue;
     }
     failCount = 0;
-    
 
     cur_dist = d;
     Serial.print("Afstand: ");
     Serial.print(cur_dist);
     Serial.println(" cm");
 
-    if (goingDown && cur_dist <= target) break;
-    if (!goingDown && cur_dist >= target) break;
+    if (reachedTarget(dir, cur_dist, targetCm)) break;
 
     delay(50);
   }
 
   digitalWrite(activePin, LOW); // always stop, regardless of why the loop ended
-  lidarOff();
 
+  // The desk coasts a little after the motor stops; report where it settled.
+  delay(300);
+  float settled = readDistanceCm();
+  if (settled > 0) cur_dist = settled;
+
+  if (error) return {false, cur_dist, error};
+  return {true, cur_dist, nullptr};
 }
 
-
-// Handler for HTTP GET /target?cm=200
-void toTarget() {
-  int cm = 70; // default
-  if (server.hasArg("cm")) {
-    cm = server.arg("cm").toInt();
+void sendResult(const MoveResult& r) {
+  char body[64];
+  if (r.ok) {
+    formatHeightJson(body, sizeof body, r.heightCm);
+    server.send(200, "application/json", body);
+  } else {
+    formatErrorJson(body, sizeof body, r.error);
+    server.send(503, "application/json", body);
   }
-  cm = min(cm, 114);
-  cm = max(64, cm);
+}
 
-  server.send(200, "text/plain", "Moving to target");
-  move_to_target(cm);
+void sendBadRequest() {
+  char body[64];
+  formatErrorJson(body, sizeof body, "missing or invalid cm");
+  server.send(400, "application/json", body);
+}
+
+// GET /target?cm=90 -> moves to 90 cm (clamped), replies {"height":90.1}
+void handleTarget() {
+  float cm;
+  if (!parseCm(server.arg("cm").c_str(), &cm)) {
+    sendBadRequest();
+    return;
+  }
+  if (!lidarOn()) {
+    sendResult({false, 0, "sensor unavailable"});
+    return;
+  }
+  MoveResult r = moveTo(clampHeight(cm));
+  lidarOff();
+  sendResult(r);
+}
+
+// GET /nudge?cm=-1 -> moves 1 cm down from the current height (clamped)
+void handleNudge() {
+  float delta;
+  if (!parseCm(server.arg("cm").c_str(), &delta)) {
+    sendBadRequest();
+    return;
+  }
+  if (!lidarOn()) {
+    sendResult({false, 0, "sensor unavailable"});
+    return;
+  }
+  float cur = readDistanceCm();
+  MoveResult r = cur < 0 ? MoveResult{false, 0, "sensor unavailable"}
+                         : moveTo(clampHeight(cur + delta));
+  lidarOff();
+  sendResult(r);
+}
+
+// GET /height -> one reading, lidar off again, replies {"height":92.4}
+void handleHeight() {
+  if (!lidarOn()) {
+    sendResult({false, 0, "sensor unavailable"});
+    return;
+  }
+  float cur = readDistanceCm();
+  lidarOff();
+  if (cur < 0) {
+    sendResult({false, 0, "sensor unavailable"});
+    return;
+  }
+  sendResult({true, cur, nullptr});
 }
 
 
@@ -167,7 +233,9 @@ void setup() {
   lidarOff();
 
 
-  server.on("/target", toTarget);
+  server.on("/target", handleTarget);
+  server.on("/nudge", handleNudge);
+  server.on("/height", handleHeight);
   server.begin();
 }
 

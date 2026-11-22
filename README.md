@@ -4,7 +4,7 @@ Open-hardware controller for a motorized (sit/stand) desk. A
 [Seeed XIAO ESP32-C6](https://wiki.seeedstudio.com/xiao_esp32c6_getting_started/)
 measures the desk height with a VL53L1X time-of-flight lidar and drives the
 desk's up/down motor lines until it reaches a requested height, exposed over a
-small WiFi web server.
+small WiFi web server that [Home Assistant](#home-assistant) can control.
 
 > `skrivebord` is Danish for *desk*.
 
@@ -16,11 +16,23 @@ small WiFi web server.
 
 ## How it works
 
-- The ESP32-C6 hosts an HTTP endpoint: `GET /target?cm=<height>`.
-- On request it powers on the lidar, reads the current height, then holds the
-  UP or DOWN line until the measured height reaches the target.
-- Target height is clamped to a safe range (64–114 cm) and every move has a
+- The ESP32-C6 hosts three HTTP endpoints. Each replies only once the action
+  is finished, with the measured height as JSON:
+
+  | Request | Action | Reply |
+  |---------|--------|-------|
+  | `GET /target?cm=90` | Move to 90 cm | `{"height":90.1}` |
+  | `GET /nudge?cm=1` (or `-1`) | Move 1 cm up (or down) from where it is | `{"height":91.2}` |
+  | `GET /height` | Take one reading | `{"height":92.4}` |
+
+- The lidar is powered off (XSHUT low) except while a request runs.
+- On a move it reads the current height, then holds the UP or DOWN line until
+  the measured height reaches the target. Within 0.5 cm of the target it does
+  not move at all.
+- Targets are clamped to a safe range (64–114 cm) and every move has a 20 s
   hard safety timeout, so the motor is never left running.
+- A missing or non-numeric `cm` returns `400`; a lidar failure, lost sensor or
+  safety timeout returns `503` with `{"error":"..."}`.
 
 ## Repository layout
 
@@ -42,14 +54,16 @@ small WiFi web server.
 
 | File | Use |
 |------|-----|
-| `main/simple_up_down.ino` | Main firmware: lidar-guided move-to-height over WiFi |
+| `main/main.ino` | Main firmware: lidar-guided move-to-height over WiFi |
+| `main/desk_logic.h` | Pure height/direction/JSON logic, unit-tested on a computer |
+| `tests/run_tests.sh` | Builds and runs those unit tests (`c++`, no hardware needed) |
 | `lidar_xshut_test/lidar_xshut_test.ino` | Standalone lidar bring-up / XSHUT test |
 
 ## Building the firmware
 
 1. Install the ESP32 board support (Seeed XIAO ESP32-C6) in the Arduino IDE.
 2. Install the **VL53L1X** (Pololu) library via Library Manager.
-3. Open `esp_program/main/simple_up_down.ino` and set your WiFi credentials:
+3. Open `esp_program/main/main.ino` and set your WiFi credentials:
 
    ```cpp
    const char* ssid     = "XXX";   // <- your network
@@ -61,6 +75,8 @@ small WiFi web server.
 
 4. Flash to the board, open the serial monitor at 115200 baud to see the
    assigned IP, then move the desk with e.g. `http://<device-ip>/target?cm=90`.
+
+To check the logic without the board, run `esp_program/tests/run_tests.sh`.
 
 ## Hardware
 
