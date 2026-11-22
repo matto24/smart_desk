@@ -67,6 +67,15 @@ int main() {
   CHECK(!isStaleRequest(100, 0, false));          // nothing moved yet
   CHECK(isStaleRequest(5, 0xFFFFFFFFUL - 10, true));  // millis() wraparound
 
+  // wifiAction: retry every 15 s while offline, restart after 5 min offline
+  CHECK(wifiAction(true, 999999, 0, 0) == WifiAction::None);
+  CHECK(wifiAction(false, 10000, 0, 0) == WifiAction::None);      // 10 s since attempt
+  CHECK(wifiAction(false, 15000, 0, 0) == WifiAction::Retry);     // 15 s since attempt
+  CHECK(wifiAction(false, 60000, 0, 50000) == WifiAction::None);  // just retried
+  CHECK(wifiAction(false, 300000, 0, 295000) == WifiAction::Restart);  // 5 min offline
+  CHECK(wifiAction(false, 20000, 0xFFFFFFFFUL - 1000, 0xFFFFFFFFUL - 1000) ==
+        WifiAction::Retry);                                       // millis() wraparound
+
   // JSON
   char b[64];
   formatHeightJson(b, sizeof b, 90.14f);

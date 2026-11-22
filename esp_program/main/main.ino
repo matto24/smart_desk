@@ -24,6 +24,12 @@ const unsigned long MAX_MOVE_MS = 20000; // hard safety cutoff
 uint32_t lastMoveEndMs = 0;
 bool hasMoved = false;
 
+// WiFi watchdog state; see wifiAction() in desk_logic.h.
+const unsigned long WIFI_BOOT_WAIT_MS = 30000;
+uint32_t wifiLastConnectedMs = 0;
+uint32_t wifiLastAttemptMs = 0;
+bool wifiWasConnected = false;
+
 
 void initWiFi() {
   pinMode(WIFI_ENABLE, OUTPUT); // pinMode(3, OUTPUT);
@@ -40,15 +46,57 @@ void initWiFi() {
   delay(100);
   WiFi.begin(ssid,password);
   Serial.println("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
+  // Don't wait forever: if the router isn't up yet, loop() keeps retrying.
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_BOOT_WAIT_MS) {
     Serial.print(".");
     delay(1000);
   }
+  wifiLastConnectedMs = millis();
+  wifiLastAttemptMs = millis();
 
-  Serial.println("\nWiFi connected!");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-  delay(5000);
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiWasConnected = true;
+    Serial.println("\nWiFi connected!");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+    delay(5000);
+  } else {
+    Serial.println("\nWiFi not connected yet - will keep retrying");
+  }
+}
+
+// Called from loop(): reconnects after drops the ESP32 core won't retry on
+// its own, and as a last resort restarts the board (like unplugging it).
+void ensureWiFi() {
+  uint32_t now = millis();
+  bool connected = WiFi.status() == WL_CONNECTED;
+  if (connected) {
+    wifiLastConnectedMs = now;
+    if (!wifiWasConnected) {
+      Serial.print("WiFi reconnected, IP address: ");
+      Serial.println(WiFi.localIP());
+    }
+    wifiWasConnected = true;
+    return;
+  }
+  wifiWasConnected = false;
+
+  switch (wifiAction(connected, now, wifiLastConnectedMs, wifiLastAttemptMs)) {
+    case WifiAction::Retry:
+      Serial.println("WiFi down - retrying");
+      wifiLastAttemptMs = now;
+      WiFi.disconnect();
+      WiFi.begin(ssid, password);
+      break;
+    case WifiAction::Restart:
+      Serial.println("WiFi down for 5 minutes - restarting");
+      delay(100);
+      ESP.restart();
+      break;
+    default:
+      break;
+  }
 }
 
 bool lidarOn() {
@@ -264,5 +312,6 @@ void setup() {
 }
 
 void loop() {
+  ensureWiFi();
   server.handleClient();
 }

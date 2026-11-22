@@ -56,6 +56,22 @@ inline bool isStaleRequest(uint32_t nowMs, uint32_t lastMoveEndMs, bool hasMoved
   return hasMoved && (uint32_t)(nowMs - lastMoveEndMs) < kStaleRequestWindowMs;
 }
 
+// WiFi watchdog. The ESP32 core stops retrying after some disconnect reasons
+// (e.g. AUTH_FAIL while the router reboots, or a lost IP), which used to need
+// a power cycle. loop() asks this what to do.
+constexpr uint32_t kWifiRetryIntervalMs = 15000;   // retry every 15 s offline
+constexpr uint32_t kWifiRestartAfterMs = 300000;   // reboot after 5 min offline
+
+enum class WifiAction { None, Retry, Restart };
+
+inline WifiAction wifiAction(bool connected, uint32_t nowMs, uint32_t lastConnectedMs,
+                             uint32_t lastAttemptMs) {
+  if (connected) return WifiAction::None;
+  if ((uint32_t)(nowMs - lastConnectedMs) >= kWifiRestartAfterMs) return WifiAction::Restart;
+  if ((uint32_t)(nowMs - lastAttemptMs) >= kWifiRetryIntervalMs) return WifiAction::Retry;
+  return WifiAction::None;
+}
+
 inline Direction chooseDirection(float currentCm, float targetCm) {
   float diff = targetCm - currentCm;
   if (std::fabs(diff) <= kDeadBandCm) return Direction::None;

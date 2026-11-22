@@ -33,6 +33,10 @@ small WiFi web server that [Home Assistant](#home-assistant) can control.
   hard safety timeout, so the motor is never left running.
 - A missing or non-numeric `cm` returns `400`; a lidar failure, lost sensor or
   safety timeout returns `503` with `{"error":"..."}`.
+- If WiFi drops (e.g. the router restarts), the controller retries every 15 s
+  and restarts itself after 5 minutes offline, so it never needs to be
+  unplugged to reconnect. At boot it waits at most 30 s for WiFi before
+  carrying on and retrying in the background.
 - A `/target` or `/nudge` sent while the desk is already moving is answered
   `409` (`{"error":"busy"}`) once the move ends, instead of starting a second
   move. `/nudge` never moves against the requested direction, even if the desk
